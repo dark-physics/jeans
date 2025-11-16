@@ -14,7 +14,7 @@ base_path = os.getcwd()  # change for your setup
 
 
 class fit:
-    def __init__(self, halo_id, data_path="/data/EAGLE-50-data/", model="SIDM1b", verbose=False):
+    def __init__(self, halo_id, data_path="/data/EAGLE-50/", model="SIDM1b", verbose=False):
         self.data_path = base_path + data_path
         self.halo_id = halo_id
         self.model = model

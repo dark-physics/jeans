@@ -1,0 +1,7 @@
+matplotlib==3.10.3
+numpy==2.3.2
+pandas==2.3.1
+scipy==1.16.1
+dill==0.4.0
+h5py>=3.10.0
+setuptools==75.3.0

@@ -6,6 +6,11 @@ __pycache__/
 # C extensions
 *.so
 
+# Data files
+*.npz
+*.hdf5
+*.h5
+
 # Distribution / packaging
 .Python
 build/
@@ -83,6 +88,8 @@ profile_default/
 ipython_config.py
 
 # pyenv
+*.env
+*.jeansenv
 #   For a library or package, you might want to ignore these files since the code is
 #   intended to run in multiple environments; otherwise, check them in:
 # .python-version

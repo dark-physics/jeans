@@ -44,9 +44,22 @@ All dependencies are listed in `requirements.txt` and will be installed automati
 Clone the repository and install:
 
 ```bash
-git clone https://github.com/AdamSmithOrlik/nonspherical-sidm-jeans-model.git
-cd nonspherical-sidm-jeans-model
+git clone https://github.com/dark-physics/jeans.git
+cd jeans
+python3 -m venv .venv
+source .venv/bin/activate
+
+pip install -r requirements.txt
+
 pip install .
+```
+
+_Note: you don't need to make a virtual environments but it avoids dependency issues._
+
+To run the jupyter notebooks you may also need to install ipykernel:
+
+```bash
+pip install ipykernel
 ```
 
 ## Usage Example

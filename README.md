@@ -1,6 +1,6 @@
 # jeans
 
-**jeans** is a Python package for computing dark matter halo profiles with baryons used in the paper [_Jeans Model for the Shapes of Self-interacting Dark Matter Halos_](link). The jeans package can be used to model collisioinless dark matter (CDM) and self-interacting dark matter (SIDM) in one dimension assuming spherical symmetry and two dimensions assuming axisymmetry.
+**jeans** is a Python package for computing dark matter halo profiles with baryons used in the paper [_Jeans Model for the Shapes of Self-interacting Dark Matter Halos_](https://arxiv.org/pdf/2511.10765). The jeans package can be used to model collisioinless dark matter (CDM) and self-interacting dark matter (SIDM) in one dimension assuming spherical symmetry and two dimensions assuming axisymmetry.
 
 This package is intended for researchers and students working in astrophysics and cosmology, especially those interested in the structure and morphology of SIDM halos.
 

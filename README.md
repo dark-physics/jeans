@@ -6,7 +6,7 @@ This package is intended for researchers and students working in astrophysics an
 
 ## Features
 
-The jeans model incorporates the effects on the dark matter halo due to the baryon distributions, axis ratios, and adiabatic contraction for a wide range of halo masses. Currently the jeans model is implemented in one- and two-dimensions, with further work intended to extend two the full three-dimensional model. A shortlist of the inputs and outputs of the model are listed below:
+The jeans model incorporates the effects on the dark matter halo due to the baryon distributions, axis ratios, and adiabatic contraction for a wide range of halo masses. Currently the jeans model is implemented in one- and two-dimensions, with further work intended to extend to the full three-dimensional model. A shortlist of the inputs and outputs of the model are listed below:
 
 Inputs
 

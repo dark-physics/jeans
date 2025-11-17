@@ -62,6 +62,12 @@ To run the jupyter notebooks you may also need to install ipykernel:
 pip install ipykernel
 ```
 
+To install the **jeans** package into a Python virtual environment for use in your own project run the following command:
+
+```bash
+pip install git+https://github.com/dark-physics/jeans.git
+```
+
 ## Usage Example
 
 ### Use in Jupyter Notebooks

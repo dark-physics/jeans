@@ -16,7 +16,7 @@ Inputs
 - Axis Ratio (constant or function): q0
 - Baryon Potential: Phi_b
 - CDM Halo Type: NFW or Einasto
-- Adiabatic Contraction: Cautun or Gnedin
+- Adiabatic Contraction: [Cautun et al. 2014](https://arxiv.org/abs/1911.04557) or [Gnedin et al. 2004](https://arxiv.org/abs/astro-ph/0406247)
 
 Outputs
 

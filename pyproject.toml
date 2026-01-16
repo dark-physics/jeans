@@ -12,7 +12,7 @@ authors = [
 ]
 license = { text = "MIT" }
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9,<3.14"
 dependencies = [
   "matplotlib==3.10.3",
   "numpy==2.3.2",

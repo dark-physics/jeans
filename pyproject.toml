@@ -14,7 +14,7 @@ license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.9,<3.14"
 dependencies = [
-  "numpy>=2.3,<2.4",
+  "numpy>=2.2,<2.4",
   "scipy>=1.11,<1.17",
   "pandas>=2.2,<2.4",
   "matplotlib>=3.8,<3.11",

@@ -14,13 +14,12 @@ license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.9,<3.14"
 dependencies = [
-  "matplotlib==3.10.3",
-  "numpy==2.3.2",
-  "pandas==2.3.1", 
-  "scipy==1.16.1",
-  "dill==0.4.0",
-  "h5py==3.14.0",
-  "setuptools==75.3.0"
+  "numpy>=2.3,<2.4",
+  "scipy>=1.11,<1.17",
+  "pandas>=2.2,<2.4",
+  "matplotlib>=3.8,<3.11",
+  "h5py>=3.13,<3.16",
+  "dill>=0.3.8,<0.4.1"
 ]
 
 [project.urls]

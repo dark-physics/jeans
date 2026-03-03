@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jeans"
-version = "1.0.0"
+version = "1.0.1"
 description = "Jeans modelling for SIDM halos."
 authors = [
   { name = "Sean Tulin", email = "stulin@yorku.ca" },
@@ -14,13 +14,10 @@ license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.9,<3.14"
 dependencies = [
-  "matplotlib==3.10.3",
-  "numpy==2.3.2",
-  "pandas==2.3.1", 
-  "scipy==1.16.1",
-  "dill==0.4.0",
-  "h5py==3.14.0",
-  "setuptools==75.3.0"
+  "numpy>=2.3,<3",
+  "pandas>=2.3,<3", 
+  "scipy>=1.16,<2",
+  "dill>=0.4,<1",
 ]
 
 [project.urls]

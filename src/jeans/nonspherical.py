@@ -14,17 +14,14 @@ This file contains the main relaxation solver and supporting routines for nonsph
 ############################## IMPORTS ###############################
 ######################################################################
 import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
-
-from scipy.interpolate import interp1d
 import scipy.sparse as sparse
 
 from inspect import signature
 
 from . import spherical as sphmodel
 from .definitions import GN, Z, integrate
-from .classes import isothermal_profile, CDM_profile
+
+# from .classes import isothermal_profile, CDM_profile
 from .tools import timed
 
 

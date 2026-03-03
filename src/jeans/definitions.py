@@ -14,7 +14,6 @@ This file contains physical constants (e.g., $G_N$), default functions (e.g., no
 ############################## IMPORTS ###############################
 ######################################################################
 import numpy as np
-import matplotlib.pyplot as plt
 
 # These warnings raise an error if quad raises an integration warning
 # integrate() will use solve_ivp instead to evaluate the integral

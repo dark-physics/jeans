@@ -18,12 +18,14 @@ from inspect import signature
 from scipy.integrate import solve_ivp
 
 from .definitions import GN, Z, integrate, central_derivative
+from .tools import timed
 
 
 ######################################################################
 ######################## FUNCTION DEFINITIONS ########################
 ######################################################################
 # Baryon contributions to rotation curve
+@timed
 def Vsq_baryon(Phi_b, r):
     r"""
     Compute the baryonic contribution $v^2$ to the circular velocity from the baryon potential $\Phi_b$.
@@ -80,6 +82,7 @@ def Vsq_baryon(Phi_b, r):
 
 
 # Halo contribution to rotation curve for given L,M mode
+@timed
 def Vsq_LM(rho_LM, r, L, M=0):
     r"""
     Compute the contribution $v^2$ to the circular velocity from the $(L, M)$ multipole of the halo density.
@@ -166,14 +169,10 @@ def Vsq_LM(rho_LM, r, L, M=0):
             integrand = lambda r, y: r ** (1 - L) * rho_LM(r)
             rmin, rmax = r_eval[0], r_eval[-1]
 
-            H_vals = np.zeros_like(r_eval)
-            integral_list = []
-            for i in range(len(r_eval) - 1):
-                integral = integrate(lambda r: r ** (1 - L) * rho_LM(r), r_eval[i], r_eval[i + 1], rtol=1e-6, atol=1e-6)
-                integral_list.append(integral)
-
-            for i in range(len(H_vals)):
-                H_vals[i] = np.sum(integral_list[i:])
+            # Evaluate H(r) from one cumulative adaptive solve rather than a
+            # separate quadrature over every pair of requested radii.
+            H_solution = solve_ivp(integrand, [rmin, rmax], [0], rtol=1e-6, atol=1e-6, t_eval=r_eval)
+            H_vals = H_solution.y[0][-1] - H_solution.y[0]
 
             Vsq_out[r_arr > 0] += -prefactor * L * r_eval**L * H_vals
 

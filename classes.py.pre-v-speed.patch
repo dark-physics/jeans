@@ -1,0 +1,20 @@
+Pre-velocity-optimization snapshot for src/jeans/classes.py
+
+Base file: git HEAD version of src/jeans/classes.py
+
+@@ classes.py: timing import
+-from .tools import compute_Mb, compute_r_sph_grid
++from .tools import compute_Mb, compute_r_sph_grid, timed
+
+@@ classes.py: rho_LM_interp timing
+     # Makes interpolation function for rho_LM
+     # Useful for faster calculations of rotation curve and potential
++    @timed
+     def rho_LM_interp(self, L, M, k=3, num=50):
+
+@@ classes.py: Vsq_dm timing
+     def V_baryon(self, r):
+         return np.sqrt(self.Vsq_baryon(r))
+
++    @timed
+     def Vsq_dm(self, r, Lmax=10, **kwargs):

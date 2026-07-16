@@ -1,0 +1,17 @@
+Pre-velocity-optimization snapshot for src/jeans/rotcurve.py
+
+Base file: git HEAD version of src/jeans/rotcurve.py
+
+@@ rotcurve.py: timing import
+ from .definitions import GN, Z, integrate, central_derivative
++from .tools import timed
+
+@@ rotcurve.py: Vsq_baryon timing
+ # Baryon contributions to rotation curve
++@timed
+ def Vsq_baryon(Phi_b, r):
+
+@@ rotcurve.py: Vsq_LM timing
+ # Halo contribution to rotation curve for given L,M mode
++@timed
+ def Vsq_LM(rho_LM, r, L, M=0):

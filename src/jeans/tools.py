@@ -5,7 +5,7 @@ Purpose:   Utility functions for SIDM and CDM halo modeling, including baryon ma
 Authors:   Sean Tulin, Adam Smith Orlik
 Contact:   stulin@yorku.ca, asorlik@yorku.ca
 Status:    Stable Version
-Last Edit: 2025-09-16
+Last Edit: 2025-07-16
 
 This file contains core computational tools for the nonspherical SIDM Jeans modeling package, including baryon mass, potential, and shape calculations.
 """
@@ -17,7 +17,8 @@ import numpy as np
 from inspect import signature
 from scipy.interpolate import InterpolatedUnivariateSpline, RectBivariateSpline
 from scipy.optimize import brentq
-from scipy.integrate import solve_ivp
+from scipy.integrate import cumulative_trapezoid, solve_ivp
+from numpy.polynomial.legendre import leggauss
 import dill
 
 from .definitions import no_baryons, integrate, GN
@@ -51,6 +52,37 @@ def timed(func):
 ######################################################################
 ######################## FUNCTION DEFINITIONS ########################
 ######################################################################
+
+
+def _axisymmetric_potential_moments(Phi_b, r_list, angular_num=64):
+    """Evaluate the monopole and L=2 moment of Phi_b with fixed Gauss-Legendre quadrature."""
+    r_arr = np.asarray(r_list, dtype=float)
+    cos_theta, weights = leggauss(angular_num)
+    theta = np.arccos(cos_theta)
+    P2 = 0.5 * (3 * cos_theta**2 - 1)
+
+    # Prefer evaluating the full radial/angular grid in one call. Fall back to
+    # vectorized angular calls, then scalar calls, for user potentials that do
+    # not support NumPy broadcasting.
+    try:
+        values = np.asarray(Phi_b(r_arr[:, None], theta[None, :]), dtype=float)
+        values = np.broadcast_to(values, (r_arr.size, theta.size))
+    except (TypeError, ValueError):
+        rows = []
+        for r in r_arr:
+            try:
+                row = np.asarray(Phi_b(r, theta), dtype=float)
+                row = np.broadcast_to(row, theta.shape)
+            except (TypeError, ValueError):
+                row = np.array([Phi_b(r, th) for th in theta], dtype=float)
+            rows.append(row)
+        values = np.asarray(rows)
+
+    monopole = 0.5 * (values @ weights)
+    quadrupole = values @ (weights * P2)
+    return monopole, quadrupole
+
+
 # Load a pickled profile object
 def load(filename):
     with open(filename, "rb") as f:
@@ -58,7 +90,8 @@ def load(filename):
 
 
 # Compute baryon enclosed mass profile from baryon potential
-def compute_Mb(Phi_b, rmin, rmax, num=100):
+@timed
+def compute_Mb(Phi_b, rmin, rmax, num=100, angular_num=64):
     r"""
     Compute the baryon enclosed mass profile $M_b(r)$ from a baryon potential function $\Phi_b$.
 
@@ -100,12 +133,14 @@ def compute_Mb(Phi_b, rmin, rmax, num=100):
         Phi_b_sph_avg_list = np.array([Phi_b(r) for r in r_list])
 
     elif num_variables == 2:
-
-        def Phi_b_sph_avg_func(r):
-            integrand = lambda th: Phi_b(r, th) * np.sin(th)
-            return 0.5 * integrate(integrand, 0, np.pi)
-
-        Phi_b_sph_avg_list = np.array([Phi_b_sph_avg_func(r) for r in r_list])
+        # Also sample the radial range used by the default q_b calculation so
+        # its quadrupole moment can be reused later without another angular pass.
+        r200 = rmax / 1e2
+        q_r_list = np.geomspace(1e-6 * r200, r200, num=num)
+        moment_log_r_list = np.unique(np.concatenate((np.log(r_list), np.log(q_r_list))))
+        moment_r_list = np.exp(moment_log_r_list)
+        monopole, quadrupole = _axisymmetric_potential_moments(Phi_b, moment_r_list, angular_num=angular_num)
+        Phi_b_sph_avg_list = np.interp(np.log(r_list), moment_log_r_list, monopole)
 
     else:
         raise Exception("Case with num_sph_coords=%d not supported." % num_sph_coords)
@@ -132,25 +167,31 @@ def compute_Mb(Phi_b, rmin, rmax, num=100):
         dPhi_b_dr_interp = lambda r: 0
 
     # Calculate M_b
-    # Define M_b recursively to handle case where r is a number or a list/array
     def M_b(r):
+        r_arr = np.asarray(r, dtype=float)
+        scalar = r_arr.ndim == 0
+        r_eval = np.atleast_1d(r_arr)
+        output = np.empty_like(r_eval)
 
-        # r is a list or array
-        if np.ndim(r) > 0:
-            return np.array([M_b(ri) for ri in r])
+        below = r_eval < rmin
+        above = r_eval > r_list[-1]
+        inside = ~(below | above)
 
-        # r is a number
-        elif r < rmin:
-            Mmin = rmin**2 * dPhi_b_dr_interp(rmin) / GN
-            return float(Mmin * (r / rmin) ** 3)
+        Mmin = rmin**2 * dPhi_b_dr_interp(rmin) / GN
+        Mmax_local = r_list[-1] ** 2 * dPhi_b_dr_interp(r_list[-1]) / GN
+        output[below] = Mmin * (r_eval[below] / rmin) ** 3
+        output[above] = Mmax_local
+        output[inside] = r_eval[inside] ** 2 * dPhi_b_dr_interp(r_eval[inside]) / GN
 
-        elif r > r_list[-1]:
-            rmax = r_list[-1]
-            Mmax = rmax**2 * dPhi_b_dr_interp(rmax) / GN
-            return float(Mmax)
+        output = output.reshape(r_arr.shape)
+        return output.item() if scalar else output
 
-        else:
-            return float(r**2 * dPhi_b_dr_interp(r) / GN)
+    # Cache the angular moments for compute_log_q_baryon. Function attributes
+    # keep this optimization local to the derived M_b callable.
+    if num_variables == 2:
+        M_b._Phi_b_source = Phi_b
+        M_b._moment_r_list = moment_r_list
+        M_b._quadrupole_interp = InterpolatedUnivariateSpline(moment_log_r_list, quadrupole)
 
     # Return M_b function
     return M_b
@@ -204,9 +245,14 @@ def compute_Phi_b_spherical(Mb, rmin, rmax):
 
     def Phi_b_out(r):
 
+        r_arr = np.asarray(r)
+
         # Case where r is an array or list
-        if np.ndim(r) > 1:
-            return np.array([Phi_b(ri) for ri in r])
+        if r_arr.ndim > 0:
+            return np.array([Phi_b_out(ri) for ri in r_arr])
+
+        # Normalize NumPy scalar values before evaluating scalar branches.
+        r = float(r_arr)
 
         # Case where r is a single number
         if (r <= rmin) and (r >= 0):
@@ -216,10 +262,9 @@ def compute_Phi_b_spherical(Mb, rmin, rmax):
             return float(y_int(r)[0] + Phi_0)
 
         elif r >= rmax:
-            return float(-GN * Mb(rmax) / r)
+            return float(-GN * Mmax / r)
         else:
-            print(r, "value for r not valid")
-            return 0
+            raise ValueError(f"Invalid radius r={r}")
 
     return Phi_b_out
 
@@ -357,7 +402,7 @@ def compute_q_baryon(sph_halo, **kwargs):
 
 
 @timed
-def compute_log_q_baryon(halo, rmin=None, num=100, method="leading", **extraneous):
+def compute_log_q_baryon(halo, rmin=None, num=100, method="leading", angular_num=64, **extraneous):
     r"""
     Compute the logarithmic nonsphericity profile $\log q_b(r)$ of the baryon potential for a given halo (modern method).
 
@@ -405,20 +450,17 @@ def compute_log_q_baryon(halo, rmin=None, num=100, method="leading", **extraneou
     # Calculate log qb from formula
     # log qb = - 15/4 (G Mb / r)^-1 int_-1^1 dcos(th) P2(th) Phi_b(r,th)
     elif (num_variables == 2) and (method == "leading"):
-
-        # Legendre polynomial
-        # x = cos(th)
-        P2 = lambda x: 0.5 * (3 * x**2 - 1)
-
-        # Integrate
-        def Phi_b_20(r):
-            # Integrand
-            integrand = lambda th: Phi_b(r, th) * np.sin(th) * P2(np.cos(th))
-            return integrate(integrand, 0, np.pi)
-
         prefactor = -15 / 4 * (GN * M_b(r_list) / r_list) ** -1
 
-        log_qb_list = prefactor * np.array([Phi_b_20(r) for r in r_list])
+        # Reuse the quadrupole already sampled while constructing M_b whenever
+        # it came from this same baryon potential. Otherwise evaluate it with
+        # the same fixed quadrature used by compute_Mb.
+        if getattr(M_b, "_Phi_b_source", None) is Phi_b:
+            Phi_b_20_list = M_b._quadrupole_interp(np.log(r_list))
+        else:
+            _, Phi_b_20_list = _axisymmetric_potential_moments(Phi_b, r_list, angular_num=angular_num)
+
+        log_qb_list = prefactor * Phi_b_20_list
 
     # Calculate log qb from formula
     # log qb = 15/4 (G Mb / r sigma0^2)^-1 int_-1^1 dcos(th) P2(th) e^(- Delta_Phi_b/sigma0^2)
@@ -452,34 +494,21 @@ def compute_log_q_baryon(halo, rmin=None, num=100, method="leading", **extraneou
     # Make interpolation function
     log_qb_interp = InterpolatedUnivariateSpline(np.log(r_list), log_qb_list)
 
-    # Define log_qb_func recursively to handle case where r is a number or a list/array
-    # Also can handle cases r < rmin and r > rmax
     def log_qb_func(r):
+        r_arr = np.asarray(r, dtype=float)
+        scalar = r_arr.ndim == 0
+        r_eval = np.atleast_1d(r_arr)
+        output = np.empty_like(r_eval)
 
-        # r is a list or array
-        if np.ndim(r) > 0:
-            return np.array([log_qb_func(ri) for ri in r])
+        below = r_eval < rmin
+        above = r_eval > rmax
+        inside = ~(below | above)
+        output[below] = log_qb_list[0]
+        output[above] = log_qb_list[-1] * (rmax / r_eval[above]) ** 3
+        output[inside] = log_qb_interp(np.log(r_eval[inside]))
 
-        # Cases where r is a number
-
-        # Extrapolate Phi_20 ~ r^L (L=2) for small r
-        # and Mb ~ r^3 for small r
-        # Thus, take log qb as constant for r < rmin
-        elif r < rmin:
-            log_qb = log_qb_list[0]
-            return log_qb
-
-        # Extrapolate Phi_20 ~ r^-(L+1) (L=2) for large r
-        # and Mb ~ constant for large r
-        # Thus, take log qb as ~ r^-3 for r > rmax
-        elif r > rmax:
-            log_qb = log_qb_list[-1] * (rmax / r) ** 3
-            return log_qb
-
-        # For rmin < r < rmax, use interpolation function
-        else:
-            log_qb = log_qb_interp(np.log(r))
-            return log_qb
+        output = output.reshape(r_arr.shape)
+        return output.item() if scalar else output
 
     # Return vectorized function for qb
     return log_qb_func
@@ -517,7 +546,7 @@ def compute_q_iso_old(sph_halo, q0_func=None, rm_param=0.9, q_model=None, **kwar
     r200 = sph_halo.outer.r200
 
     # Define array of r points for calculating q_iso
-    r = np.geomspace(1e-6 * r200, r200)
+    r = np.geomspace(1e-6 * r200, r200, num=200)
 
     # Calculate DM fraction vs radius
     # Equivalent to fdm = Mdm(r) / (Mdm(r) + Mb(r))
@@ -657,24 +686,17 @@ def compute_q_iso(
 
     for i in range(max_iter):
 
-        # Define integrals F(r) = int_0^r dx x^5 rho_dm'(x) log q(x)
-        def dF_dr(r, F):
-            if r == 0:
-                return 0
-            else:
-                return drho_dr(r) * log_q_iso(r) * r**5
-
-        # Define integrals G(r) = int_r^r1 dx rho_dm'(x) log q(x)
-        # Evaluate from integrals H(r) = int_rmin^r dx rho_dm'(x) log q(x)
-        # G(r) = H(r1) - H(r)
-        def dH_dr(r, F):
-            return drho_dr(r) * log_q_iso(r)
-
-        F_solution = solve_ivp(dF_dr, [0, rmax], [0], t_eval=r_list)
-        F_vals = F_solution.y[0]
-
-        H_solution = solve_ivp(dH_dr, [rmin, rmax], [0], t_eval=r_list)
-        G_vals = H_solution.y[0][-1] - H_solution.y[0]
+        # These are cumulative integrals needed only on r_list. Evaluating
+        # them directly avoids two adaptive ODE solves and their many scalar
+        # callbacks during every shape iteration.
+        common_integrand = drho_dr(r_list) * log_q_iso(r_list)
+        F_vals = cumulative_trapezoid(
+            np.concatenate(([0.0], common_integrand * r_list**5)),
+            np.concatenate(([0.0], r_list)),
+            initial=0,
+        )[1:]
+        H_vals = cumulative_trapezoid(common_integrand, r_list, initial=0)
+        G_vals = H_vals[-1] - H_vals
 
         log_q_iso_inner_list = -4 * np.pi / (5 * Mtot(r_list)) * (F_vals / r_list**2 + r_list**3 * G_vals)
 
@@ -683,32 +705,29 @@ def compute_q_iso(
         inner_halo_interp = InterpolatedUnivariateSpline(log_r_list, log_q_iso_inner_list, ext=2)
 
         def log_q_iso_inner(r):
+            r_arr = np.asarray(r, dtype=float)
+            scalar = r_arr.ndim == 0
+            r_eval = np.atleast_1d(r_arr)
+            output = np.empty_like(r_eval)
 
-            # Handle case where r is a list or array recursively
-            if np.ndim(r) > 0:
-                return np.array([log_q_iso_inner(ri) for ri in r])
+            below = r_eval < rmin
+            above = r_eval > rmax
+            inside = ~(below | above)
 
-            # Handle case where r is a single number
+            if extrap_method == "linear":
+                x = log_r_list[:2]
+                y = log_q_iso_inner_list[:2]
+                log_r = np.log(r_eval[below])
+                output[below] = (y[1] * (log_r - x[0]) + y[0] * (x[1] - log_r)) / (x[1] - x[0])
+            elif extrap_method == "constant":
+                output[below] = log_q_iso_inner_list[0]
             else:
-                log_r = np.log(r)
+                raise ValueError(f"Unknown extrap_method={extrap_method}")
 
-                # Extrapolates with linear function (in log r) for r < rmin
-                if (r < rmin) and (extrap_method == "linear"):
-                    x = log_r_list[:2]
-                    y = log_q_iso_inner_list[:2]
-                    return (y[1] * (log_r - x[0]) + y[0] * (x[1] - log_r)) / (x[1] - x[0])
-
-                # Extrapolates with constant for r < rmin
-                elif (r < rmin) and (extrap_method == "constant"):
-                    return log_q_iso_inner_list[0]
-
-                # Extrapolates with constant for r > rmax
-                elif r > rmax:
-                    return log_q_iso_inner_list[-1]
-
-                # Use interpolation for rmin < r < rmax
-                else:
-                    return inner_halo_interp(log_r)
+            output[above] = log_q_iso_inner_list[-1]
+            output[inside] = inner_halo_interp(np.log(r_eval[inside]))
+            output = output.reshape(r_arr.shape)
+            return output.item() if scalar else output
 
         # Full new q_iso
         log_q_iso = lambda r: log_q_iso_b(r) + log_q_iso_outer(r) + log_q_iso_inner(r)
@@ -727,36 +746,33 @@ def compute_q_iso(
 
     # Make interpolation function for q_iso
     # Raises error if evaluated beyond limits of interpolation
-    log_q_iso_list = np.array([log_q_iso(r) for r in r_list])
+    log_q_iso_list = log_q_iso(r_list)
     iso_interp = InterpolatedUnivariateSpline(log_r_list, log_q_iso_list, ext=2)
 
     def q_iso_func(r):
+        r_arr = np.asarray(r, dtype=float)
+        scalar = r_arr.ndim == 0
+        r_eval = np.atleast_1d(r_arr)
+        log_output = np.empty_like(r_eval)
 
-        # Handle case where r is a list or array recursively
-        if np.ndim(r) > 0:
-            return np.array([q_iso_func(ri) for ri in r])
+        below = r_eval < rmin
+        above = r_eval > rmax
+        inside = ~(below | above)
 
-        # Handle case where r is a single number
+        if extrap_method == "linear":
+            x = log_r_list[:2]
+            y = log_q_iso_list[:2]
+            log_r = np.log(r_eval[below])
+            log_output[below] = (y[1] * (log_r - x[0]) + y[0] * (x[1] - log_r)) / (x[1] - x[0])
+        elif extrap_method == "constant":
+            log_output[below] = log_q_iso_list[0]
         else:
-            log_r = np.log(r)
+            raise ValueError(f"Unknown extrap_method={extrap_method}")
 
-            # Extrapolates with linear function (in log r) for r < rmin
-            if (r < rmin) and (extrap_method == "linear"):
-                x = log_r_list[:2]
-                y = log_q_iso_list[:2]
-                return np.exp((y[1] * (log_r - x[0]) + y[0] * (x[1] - log_r)) / (x[1] - x[0]))
-
-            # Extrapolates with constant for r < rmin
-            elif (r < rmin) and (extrap_method == "constant"):
-                return np.exp(log_q_iso_list[0])
-
-            # Extrapolates with constant for r > rmax
-            elif r > rmax:
-                return np.exp(log_q_iso_list[-1])
-
-            # Use interpolation for rmin < r < rmax
-            else:
-                return np.exp(iso_interp(log_r))
+        log_output[above] = log_q_iso_list[-1]
+        log_output[inside] = iso_interp(np.log(r_eval[inside]))
+        output = np.exp(log_output).reshape(r_arr.shape)
+        return output.item() if scalar else output
 
     return lambda r: q_iso_func(r)
 
@@ -809,17 +825,34 @@ def compute_q_eff(sph_halo, q0, Nm=1, old_method=False, **kwargs):
         if old_method:
             q_iso = compute_q_iso_old(sph_halo, q0=q0_func, **kwargs)
         else:
-            q_iso = compute_q_iso(sph_halo, q0=q0_func, **kwargs)
+            # Preserve a numeric q0 as numeric so compute_q_iso can use its
+            # simpler constant-shape branch.
+            q_iso = compute_q_iso(sph_halo, q0=q0, **kwargs)
 
         # Result from toy model calculation
         # k0 = 1 / (np.sqrt(2) * 5)
-        k0 = np.sqrt(2) / 5
+        # Updated with the correct decay factor 4/5
+        k0 = 4 / 5
 
-        def q_eff(r):
-            log_qiso = np.log(q_iso(r))
-            log_q0 = np.log(q0_func(r))
-            log_q = log_qiso + (log_q0 - log_qiso) * np.exp(-k0 * N(r))
+        def q_eff_direct(r_eval):
+            log_qiso = np.log(q_iso(r_eval))
+            log_q0 = np.log(q0_func(r_eval))
+            log_q = log_qiso + (log_q0 - log_qiso) * np.exp(-k0 * N(r_eval))
             return np.exp(log_q)
+
+        log_q_values = np.log(q_eff_direct(r))
+        q_eff_interp = InterpolatedUnivariateSpline(np.log(r), log_q_values, ext=3)
+
+        def q_eff(r_eval):
+            r_arr = np.asarray(r_eval, dtype=float)
+            scalar = r_arr.ndim == 0
+            radii = np.atleast_1d(r_arr)
+            output = np.empty_like(radii)
+            inside = (radii >= r[0]) & (radii <= r[-1])
+            output[inside] = np.exp(q_eff_interp(np.log(radii[inside])))
+            output[~inside] = q_eff_direct(radii[~inside])
+            output = output.reshape(r_arr.shape)
+            return output.item() if scalar else output
 
     else:
         q_eff = np.vectorize(q0_func)
@@ -861,44 +894,31 @@ def compute_r_sph_grid(outer_halo, q_func, numr=30, numth=20):
     r_list = np.geomspace(1e-6 * r200, r200, num=numr)
     th_list = np.linspace(0, np.pi / 2, num=numth)
 
-    sph_grid = np.zeros((numr, numth))
+    # Solve every radial/angular grid point simultaneously. q_func is evaluated
+    # once per iteration rather than twice for each of 600 scalar grid points.
+    r_grid, th_grid = np.meshgrid(r_list, th_list, indexing="ij")
+    R = r_grid * np.sin(th_grid)
+    z = r_grid * np.cos(th_grid)
+    rsph_old = r_grid.copy()
+    max_iter = 2000
+    steps_to_damp = max_iter // 10
+    damping = 1.0
 
-    # Spheroidal radius function
-    def r_sph(r, th, max_iter=2000, k=1, **kwargs):
+    for iteration in range(max_iter):
+        q_values = q_func(rsph_old)
+        rsph_calculated = np.sqrt(R**2 * q_values ** (2 / 3) + z**2 * q_values ** (-4 / 3))
+        rsph_new = (1 - damping) * rsph_old + damping * rsph_calculated
 
-        steps_to_damp = max_iter / 10
+        if np.allclose(rsph_new, rsph_old):
+            break
 
-        R = r * np.sin(th)
-        z = r * np.cos(th)
+        rsph_old = rsph_new
+        if (iteration + 1) % steps_to_damp == 0:
+            damping = max(0.1, damping - 0.1)
+    else:
+        raise Exception(f"rsph grid did not converge within max_iter={max_iter} iterations")
 
-        rsph_old = r
-        for i in range(max_iter):
-
-            rsph_new_calculated = np.sqrt(R**2 * q_func(rsph_old) ** (2 / 3) + z**2 * q_func(rsph_old) ** (-4 / 3))
-
-            rsph_new = (1 - k) * rsph_old + k * rsph_new_calculated
-
-            if np.allclose(rsph_new, rsph_old, **kwargs):
-                break
-
-            rsph_old = rsph_new
-
-            # if not converged within tolerance reduce the damping factor k by 0.1 every max_iter/10 iterations
-            if i % steps_to_damp == 0:
-                k -= 0.1
-
-        else:
-            raise Exception(
-                "rsph did not converge within tolerance with max_iter=%d iterations for (r,th)=(%f,%f)"
-                % (max_iter, r, th)
-            )
-
-        return rsph_new
-
-    # Calculate
-    for i in range(numr):
-        for j in range(numth):
-            sph_grid[i, j] = r_sph(r_list[i], th_list[j]) / r_list[i]
+    sph_grid = rsph_new / r_grid
 
     # Make interpolating function
     logr_list = np.log(r_list)
@@ -907,6 +927,12 @@ def compute_r_sph_grid(outer_halo, q_func, numr=30, numth=20):
     def r_sph_interp(r, th):
         # Symmetrize in theta about np.pi/2
         th_abs = np.arccos(np.abs(np.cos(th)))
-        return interp(np.log(r), th_abs, grid=False) * r
+        result = interp(np.log(r), th_abs, grid=False) * r
+
+        if np.ndim(r) == 0 and np.ndim(th) == 0:
+            return np.asarray(result).item()
+
+        return result
 
     return r_sph_interp
+

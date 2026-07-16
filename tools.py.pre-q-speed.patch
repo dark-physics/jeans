@@ -1,0 +1,49 @@
+Pre-q-optimization snapshot for src/jeans/tools.py
+
+Base file: git HEAD version of src/jeans/tools.py
+
+Apply the following changes to reconstruct the exact pre-optimization state:
+
+@@ tools.py: ENABLE_TIMING
+-ENABLE_TIMING = False  # Set to False to disable timing decorator
++ENABLE_TIMING = True  # Set to False to disable timing decorator
+
+@@ tools.py: compute_Mb decorator
+ # Compute baryon enclosed mass profile from baryon potential
++@timed
+ def compute_Mb(Phi_b, rmin, rmax, num=100):
+
+@@ tools.py: Phi_b_out
+     def Phi_b_out(r):
+
++        r_arr = np.asarray(r)
++
+         # Case where r is an array or list
+-        if np.ndim(r) > 1:
+-            return np.array([Phi_b(ri) for ri in r])
++        if r_arr.ndim > 0:
++            return np.array([Phi_b_out(ri) for ri in r_arr])
++
++        # Normalize NumPy scalar values before evaluating scalar branches.
++        r = float(r_arr)
+
+@@ tools.py: Phi_b_out outer and invalid-radius branches
+         elif r >= rmax:
+-            return float(-GN * Mb(rmax) / r)
++            return float(-GN * Mmax / r)
+         else:
+-            print(r, "value for r not valid")
+-            return 0
++            raise ValueError(f"Invalid radius r={r}")
+
+@@ tools.py: r_sph_interp
+     def r_sph_interp(r, th):
+         # Symmetrize in theta about np.pi/2
+         th_abs = np.arccos(np.abs(np.cos(th)))
+-        return interp(np.log(r), th_abs, grid=False) * r
++        result = interp(np.log(r), th_abs, grid=False) * r
++
++        if np.ndim(r) == 0 and np.ndim(th) == 0:
++            return np.asarray(result).item()
++
++        return result

@@ -27,6 +27,7 @@ from scipy.interpolate import (
     RectBivariateSpline,
 )
 from scipy.optimize import brentq, fsolve, curve_fit
+from numpy.polynomial.legendre import leggauss
 
 
 from .definitions import GN, Z, integrate, no_baryons, central_derivative
@@ -42,7 +43,7 @@ from .cdm import (
 from . import rotcurve as rotcurve
 from . import potential as potential
 
-from .tools import compute_Mb, compute_r_sph_grid
+from .tools import compute_Mb, compute_r_sph_grid, timed
 
 
 ######################################################################
@@ -54,6 +55,8 @@ class profile:
 
         self.inner = inner
         self.outer = outer
+        self._rho_LM_interp_cache = {}
+        self._rho_LM_table_cache = {}
 
         if not (outer):
             raise Exception("No outer halo set.")
@@ -245,7 +248,36 @@ class profile:
 
     # Makes interpolation function for rho_LM
     # Useful for faster calculations of rotation curve and potential
-    def rho_LM_interp(self, L, M, k=3, num=50):
+    @timed
+    def rho_LM_interp(self, L, M, k=3, num=50, angular_num=64):
+
+        cache_key = (L, M, k, num, angular_num)
+        if cache_key not in self._rho_LM_interp_cache:
+            self._rho_LM_interp_cache[cache_key] = self._build_rho_LM_interp(
+                L, M, k=k, num=num, angular_num=angular_num
+            )
+        return self._rho_LM_interp_cache[cache_key]
+
+    def _fixed_rho_LM_tables(self, num=50, angular_num=64):
+        """Calculate the L=0 and L=2 density moments from one shared angular grid."""
+        cache_key = (num, angular_num)
+        if cache_key in self._rho_LM_table_cache:
+            return self._rho_LM_table_cache[cache_key]
+
+        r200 = self.outer.r200
+        r_list = np.geomspace(1e-6 * r200, 10 * r200, num=num)
+        cos_theta, weights = leggauss(angular_num)
+        theta = np.arccos(cos_theta)
+
+        rho_grid = np.array([[self.rho_sph(r, th) for th in theta] for r in r_list])
+        moments = {
+            L: 2 * np.pi * (rho_grid @ (weights * Z(L, 0, theta, 0)))
+            for L in (0, 2)
+        }
+        self._rho_LM_table_cache[cache_key] = (r_list, moments)
+        return r_list, moments
+
+    def _build_rho_LM_interp(self, L, M, k=3, num=50, angular_num=64):
 
         # Define radii
         r200 = self.outer.r200
@@ -257,8 +289,12 @@ class profile:
         if L == 0:
 
             # Interpolation function
-            r_list = np.geomspace(rmin, rmax, num=num)
-            rho_00_list = self.rho_sph_avg(r_list) / Z(0, 0, 0, 0)
+            if self.sph_sym_flag:
+                r_list = np.geomspace(rmin, rmax, num=num)
+                rho_00_list = self.rho_sph_avg(r_list) / Z(0, 0, 0, 0)
+            else:
+                r_list, moments = self._fixed_rho_LM_tables(num=num, angular_num=angular_num)
+                rho_00_list = moments[0]
             x = np.log(r_list)
             y = np.log(rho_00_list)
             interp = InterpolatedUnivariateSpline(x, y, k=k)
@@ -297,8 +333,12 @@ class profile:
             return output_func
 
         # Remaining nonspherical cases
-        r_list = np.geomspace(rmin, rmax, num=num)
-        rho_LM_list = self.rho_LM(L, M, r_list)
+        if (M == 0) and (L in (0, 2)):
+            r_list, moments = self._fixed_rho_LM_tables(num=num, angular_num=angular_num)
+            rho_LM_list = moments[L]
+        else:
+            r_list = np.geomspace(rmin, rmax, num=num)
+            rho_LM_list = self.rho_LM(L, M, r_list)
 
         # Case where moments are all zero
         # Just test first entry
@@ -450,6 +490,7 @@ class profile:
     def V_baryon(self, r):
         return np.sqrt(self.Vsq_baryon(r))
 
+    @timed
     def Vsq_dm(self, r, Lmax=10, **kwargs):
 
         theta = np.pi / 2  # plane of disk

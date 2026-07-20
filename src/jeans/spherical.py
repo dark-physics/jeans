@@ -61,7 +61,7 @@ def relaxation(
     # assume spherical symmetry and no baryons
     r_list = np.append([0], r1 * np.logspace(-4, 0, num=init_grid))
 
-    Upsilon = 1  # Reduce this to relax more gradually from zero baryons to full baryon density
+    Upsilon = 0.1  # Reduce this to relax more gradually from zero baryons to full baryon density
     num_iter = 1
     success_flag = False
 

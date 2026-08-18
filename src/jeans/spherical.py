@@ -551,17 +551,31 @@ def iterate_relaxation(y, params, r_list, matching, Phi_b):
 
     kappa = 1
     success_flag = False
+    damping_factor = 0.5 # reduces kappa by factor of 2 each iteration if not converged
+    num_kappa_iter = 0
+    max_kappa_iter = 25 # reduces Newton step size to 0.5^25 ~= 3.0e-8
 
-    while not success_flag:
+    if not np.all(np.isfinite(Delta_y_all)):
+        return y, params, 0
+
+    while (not success_flag) and (num_kappa_iter < max_kappa_iter):
 
         y_all_new = y_all + kappa * Delta_y_all
 
         params_new = np.array(y_all_new[-2:])
 
+        if not np.all(np.isfinite(params_new)):
+            return y, params, 0
+
         if not np.allclose(params_new, params, rtol=0.5, atol=1e-8):
-            kappa = 0.1 * kappa
+            kappa *= damping_factor
         else:
             success_flag = True
+
+        num_kappa_iter += 1
+
+    if not success_flag:
+        return y, params, 0
 
     y_new = np.array(y_all_new[:-2])
     params_new = np.array(y_all_new[-2:])

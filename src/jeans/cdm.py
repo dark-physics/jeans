@@ -315,8 +315,17 @@ def AC_profiles(M200, c200, M_baryon, AC_prescription="Cautun", Gnedin_params=(1
 
     # Compute density rho(r) numerically from M(r):
     # Extrapolate beyond rmin and rmax using power law
-    dlogM_dlogr = np.gradient(np.log(M_values[1:]), np.log(r_list[1:]))
-    log_rho = np.log(M_values[1:] / (4 * np.pi * r_list[1:] ** 3) * dlogM_dlogr)
+    sampled_mass = M_values[1:]
+    sampled_radii = r_list[1:]
+    if not np.all(np.isfinite(sampled_mass)) or np.any(sampled_mass <= 0):
+        raise ValueError("Adiabatic contraction produced a non-finite or non-positive enclosed mass.")
+
+    dlogM_dlogr = np.gradient(np.log(sampled_mass), np.log(sampled_radii))
+    density_values = sampled_mass / (4 * np.pi * sampled_radii**3) * dlogM_dlogr
+    if not np.all(np.isfinite(density_values)) or np.any(density_values <= 0):
+        raise ValueError("Adiabatic contraction produced a non-finite or non-positive density.")
+
+    log_rho = np.log(density_values)
     log_rho_function = InterpolatedUnivariateSpline(np.log(r_list[1:]), log_rho, k=1, ext=0)
 
     def rho_function(r):

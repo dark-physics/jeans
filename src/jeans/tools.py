@@ -228,6 +228,19 @@ def compute_Phi_b_spherical(Mb, rmin, rmax):
     Mmin = Mb(rmin)
     Mmax = Mb(rmax)
 
+    # Avoid passing an identically zero ODE to solve_ivp.  Apart from being
+    # unnecessary, that case can trigger a divide-by-zero warning while the
+    # integrator estimates its initial step.
+    if Mmin == 0 and Mmax == 0:
+        def Phi_b_out(r):
+            r_arr = np.asarray(r, dtype=float)
+            if np.any(r_arr < 0):
+                raise ValueError(f"Invalid radius r={r}")
+            output = np.zeros_like(r_arr)
+            return output.item() if output.ndim == 0 else output
+
+        return Phi_b_out
+
     # Let y = Phi(r) - Phi(0)
     RHS = lambda r, y: GN * Mb(r) / r**2
 
@@ -935,4 +948,3 @@ def compute_r_sph_grid(outer_halo, q_func, numr=30, numth=20):
         return result
 
     return r_sph_interp
-

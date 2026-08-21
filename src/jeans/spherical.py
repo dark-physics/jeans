@@ -22,6 +22,7 @@ from inspect import signature
 from scipy.interpolate import interp1d
 import scipy.sparse as sparse
 import time
+import warnings
 
 from . import data
 
@@ -487,8 +488,16 @@ def initialize_y(rho1, M1, r_list, Phi_b=None):
     # Perform shift in phi
     # Default is no shift unless Phi_b is input
     if Phi_b:
-        phi_b_moments = make_phi_b_moment_func(Phi_b, params_out, r_list)
-        phi_b_list = np.array([-np.log(phi_b_moments(r)[0]) for r in r_list])
+        # For a spherical potential, -log(exp(-phi_b)) is exactly phi_b.
+        # Evaluating it directly avoids underflow of the intermediate moment.
+        if len(signature(Phi_b).parameters) == 1:
+            phi_b_list = np.array([(Phi_b(r) - Phi_b(0)) / sigma0**2 for r in r_list])
+        else:
+            phi_b_moments = make_phi_b_moment_func(Phi_b, params_out, r_list)
+            moment_0 = np.array([phi_b_moments(r)[0] for r in r_list])
+            if not np.all(np.isfinite(moment_0)) or np.any(moment_0 <= 0):
+                return np.full(2 * len(phi_list), np.nan), params_out
+            phi_b_list = -np.log(moment_0)
     else:
         phi_b_list = np.zeros_like(r_list, "f")
 
@@ -537,6 +546,9 @@ def make_phi_b_moment_func(Phi_b, params, r_list):
 # Relaxation step
 def iterate_relaxation(y, params, r_list, matching, Phi_b):
 
+    if not np.all(np.isfinite(y)) or not np.all(np.isfinite(params)) or np.any(np.asarray(params) <= 0):
+        return y, params, 0
+
     # Construct phi_b_moments
     phi_b_moment_func = make_phi_b_moment_func(Phi_b, params, r_list)
 
@@ -545,9 +557,17 @@ def iterate_relaxation(y, params, r_list, matching, Phi_b):
     M = sparse.csc_matrix(M)
     E = E_vector(y, params, r_list, matching, phi_b_moment_func)
 
+    if not np.all(np.isfinite(M.data)) or not np.all(np.isfinite(E)):
+        return y, params, 0
+
     # solve for shifts
     y_all = np.concatenate((y, params))
-    Delta_y_all = -sparse.linalg.spsolve(M, E)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", sparse.linalg.MatrixRankWarning)
+        try:
+            Delta_y_all = -sparse.linalg.spsolve(M, E)
+        except sparse.linalg.MatrixRankWarning:
+            return y, params, 0
 
     kappa = 1
     success_flag = False
@@ -564,7 +584,7 @@ def iterate_relaxation(y, params, r_list, matching, Phi_b):
 
         params_new = np.array(y_all_new[-2:])
 
-        if not np.all(np.isfinite(params_new)):
+        if not np.all(np.isfinite(params_new)) or np.any(params_new <= 0):
             return y, params, 0
 
         if not np.allclose(params_new, params, rtol=0.5, atol=1e-8):

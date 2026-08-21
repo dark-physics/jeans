@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jeans"
-version = "1.0.1"
+version = "1.0.2"
 description = "Jeans modelling for SIDM halos."
 authors = [
   { name = "Sean Tulin", email = "stulin@yorku.ca" },

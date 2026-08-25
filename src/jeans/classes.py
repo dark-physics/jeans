@@ -35,6 +35,7 @@ from .cdm import (
     AC_profiles,
     Einasto_profiles,
     NFW_profiles,
+    mass_concentration_to_AC_NFW_parameters,
     mass_concentration_to_NFW_parameters,
     NFW_parameters_to_mass_concentration,
     mass_concentration_to_Einasto_parameters,
@@ -1393,6 +1394,13 @@ class isothermal_profile:
 
 class CDM_profile:
 
+    """CDM halo profile, optionally including NFW adiabatic contraction.
+
+    No-AC NFW profiles retain the historical component-halo R200 convention.
+    AC profiles instead use the total DMO-equivalent R200 required by the
+    contraction prescription, while M200 remains the uncontracted DM mass.
+    """
+
     def __init__(
         self,
         *inputs,
@@ -1434,6 +1442,11 @@ class CDM_profile:
 
         self.halo_type = halo_type
 
+        if AC_prescription is not None and input_from_profile_params:
+            raise ValueError("input_from_profile_params=True is not supported with adiabatic contraction.")
+        if AC_prescription is not None and halo_type != "NFW":
+            raise ValueError("Adiabatic contraction is supported only for NFW haloes.")
+
         if halo_type == "NFW":
             if input_from_profile_params:
                 # Assume rhos, rs inputs
@@ -1442,7 +1455,10 @@ class CDM_profile:
             else:
                 # Assume M200, c inputs
                 self.M200, self.c = inputs
-                self.rhos, self.rs, self.r200 = mass_concentration_to_NFW_parameters(*inputs)
+                if AC_prescription is None:
+                    self.rhos, self.rs, self.r200 = mass_concentration_to_NFW_parameters(*inputs)
+                else:
+                    self.rhos, self.rs, self.r200 = mass_concentration_to_AC_NFW_parameters(*inputs)
 
         elif halo_type == "Einasto":
             self.gamma = gamma

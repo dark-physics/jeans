@@ -50,6 +50,8 @@ def rho_NFW(*params, mass_concentration=False):
     -----
     The NFW profile is given by:
         rho(r) = rho_s / [ (r/r_s) * (1 + r/r_s)^2 ]
+    With mass/concentration input, M200 is the spherical-overdensity mass of
+    this NFW component and M_NFW(R200) = M200.
     """
     if mass_concentration == True:
         # Assume inputs are M200,c200
@@ -88,6 +90,8 @@ def M_NFW(*params, mass_concentration=False):
     The enclosed mass profile is given by:
         M(r) = 4π rho_s r_s^3 [ln(1 + r/r_s) - r/r_s / (1 + r/r_s)]
     For small r, a quadratic approximation is used for numerical stability.
+    With mass/concentration input, M200 is the spherical-overdensity mass of
+    this NFW component and M_NFW(R200) = M200.
     """
     if mass_concentration == True:
         # Assume inputs are M200,c200
@@ -193,7 +197,23 @@ def Einasto_profiles(*params, **kwargs):
     return rho_Einasto(*params, **kwargs), M_Einasto(*params, **kwargs)
 
 
-# f_baryon=0.156352 (Cautun et al value)
+F_B_COSMIC_CAUTUN = 0.156352
+
+
+def mass_concentration_to_AC_NFW_parameters(M200_DM, c200, f_b=F_B_COSMIC_CAUTUN):
+    r"""Convert an uncontracted DM mass to the NFW parameters used by AC.
+
+    The halo radius is defined by the total DMO-equivalent mass
+    ``M200_DM / (1 - f_b)``.  The returned density normalization is that of
+    the DM component, so its enclosed mass at ``R200_tot`` is ``M200_DM``.
+    """
+    if not 0 <= f_b < 1:
+        raise ValueError("f_b must satisfy 0 <= f_b < 1.")
+
+    M200_tot_DMO = M200_DM / (1 - f_b)
+    rho_s_tot_DMO, rs, R200_tot = mass_concentration_to_NFW_parameters(M200_tot_DMO, c200)
+    rho_s_DM_DMO = (1 - f_b) * rho_s_tot_DMO
+    return rho_s_DM_DMO, rs, R200_tot
 
 #########################################
 # Adiabatically contracted NFW profiles #
@@ -207,11 +227,12 @@ def AC_profiles(M200, c200, M_baryon, AC_prescription="Cautun", Gnedin_params=(1
     Parameters
     ----------
     M200 : float
-        Halo mass within r200 (in solar masses).
+        Uncontracted dark-matter-halo mass M200_DM (in solar masses).
     c200 : float
         Concentration parameter of the NFW halo.
     M_baryon : callable
-        Function returning the enclosed baryon mass M_b(r) at radius r.
+        Final enclosed galaxy baryon mass M_b(r), distinct from the notional
+        cosmic baryon contribution in the DMO counterpart.
     AC_prescription : {'Cautun', 'Gnedin'}, optional
         Choice of adiabatic contraction model (default: 'Cautun').
         'Cautun' uses the prescription from Cautun et al. (2019),
@@ -228,17 +249,17 @@ def AC_profiles(M200, c200, M_baryon, AC_prescription="Cautun", Gnedin_params=(1
 
     Notes
     -----
-    This function modifies the NFW profile to account for baryonic contraction using either the Cautun or Gnedin prescription.
-    The returned functions are suitable for use as outer halo profiles in Jeans modeling.
+    The calculation infers M200_tot_DMO = M200_DM / (1 - f_b), which defines
+    R200_tot and c200 = R200_tot / rs. The returned density and enclosed mass
+    are contracted DM only; baryons are added separately to the gravitational
+    model.
     """
-    rho_s, rs, r200 = mass_concentration_to_NFW_parameters(M200, c200)
+    # Use the cosmic baryon fraction adopted by Cautun et al.
+    f_b = F_B_COSMIC_CAUTUN
+    rho_s_dm_dmo, rs, r200 = mass_concentration_to_AC_NFW_parameters(M200, c200, f_b=f_b)
 
-    # Use cosmological baryon fraction, not estimated value
-    # This value matches one used by Cautun et al.
-    f_b = 0.156352
-
-    # This is the baryon fraction estimated directy using input baryon profile
-    # f_b = M_baryon(r200)/(M200 + M_baryon(r200))
+    # f_b defines the DMO cosmic decomposition; it is not the observed retained
+    # cold-baryon fraction of the galaxy.
 
     # range of r values considered
     rmin = 1e-10 * r200
@@ -246,7 +267,7 @@ def AC_profiles(M200, c200, M_baryon, AC_prescription="Cautun", Gnedin_params=(1
     num_points = 1000
 
     # DM profile without AC
-    M_CDM = M_NFW(rho_s, rs)
+    M_CDM = M_NFW(rho_s_dm_dmo, rs)
 
     # AC prescription following Cautun et al [1911.04557]
     if AC_prescription == "Cautun":
@@ -344,7 +365,8 @@ def mass_concentration_to_NFW_parameters(Mvir, c, h=0.7, del_c=200, Omega_m=0.3,
     Parameters
     ----------
     Mvir : float
-        Virial mass of the halo (in solar masses).
+        Spherical-overdensity mass of the returned NFW halo component (in
+        solar masses), satisfying M_NFW(rvir) = Mvir.
     c : float
         Concentration parameter of the halo.
     h : float, optional
@@ -369,7 +391,8 @@ def mass_concentration_to_NFW_parameters(Mvir, c, h=0.7, del_c=200, Omega_m=0.3,
 
     Notes
     -----
-    This function uses the standard NFW relations to convert mass and concentration to profile parameters.
+    This function uses the standard component-halo NFW convention, with
+    M_NFW(rvir) = Mvir.
     """
     # Constants
     H0 = h * 100 * 1e-3  # km/kpc/s
